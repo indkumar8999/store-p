@@ -1,9 +1,13 @@
 package storage
 
 import (
+	"io"
+	"bytes"
+	"log"
 	"bufio"
 	"os"
 	"sync"
+	// "path/filepath"
 
 	"encoding/json"
 )
@@ -69,6 +73,51 @@ func(wal *WAL) Append(entry *WALEntry) error {
 
 	return wal.file.Sync()
 }
+
+func (wal *WAL) Retrieve(walDir string) ([]*WALEntry, error) {
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+	wals := []*WALEntry{}
+	walfile, err := os.Open(wal.file.Name())
+	if err != nil {
+		log.Printf("error opening file in read mode : %d %d with err :%v", walDir, wal.file.Name(), err)
+		return nil, err
+	}
+	reader := bufio.NewReader(walfile)
+	for {
+		var walEntry *WALEntry
+		bs, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			if len(bytes.TrimSpace(bs)) > 0 {
+				walEntry, err  = ParseToWALEntry(bs)
+				if err != nil {
+					log.Printf("error processing last line in file: %v", wal.file.Name())
+					return nil, err
+				}
+			}
+			break
+		}
+
+		if err != nil {
+			log.Fatalf("Error reading bytes from file: %v , err : %v", wal.file.Name(), err)
+			return nil, err
+		}
+		walEntry, err  = ParseToWALEntry(bs)
+		if err != nil {
+			log.Printf("error processing last line in file: %v", wal.file.Name())
+			return nil, err
+		}
+		wals = append(wals, walEntry)
+	}
+	return wals, nil
+}
+
+func ParseToWALEntry(instructionBytes []byte) (*WALEntry, error) {
+	wal := &WALEntry{}
+	err := json.Unmarshal(instructionBytes, wal)
+	return wal, err
+}
+
 
 func (wal *WAL) Close() error {
 	wal.mu.Lock()

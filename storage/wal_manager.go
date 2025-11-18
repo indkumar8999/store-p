@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 	"log"
+	"strings"
+	"strconv"
+	"slices"
 )
 
 const (
@@ -31,6 +34,7 @@ type WALManager struct{
 	mu sync.RWMutex
 	walDir string
 	compactionInProgress bool
+	store *KVStore
 }
 
 
@@ -42,6 +46,7 @@ func NewWALManager(walDir string) (*WALManager, error) {
 		currentWALFileNumber: 0,
 		compactionInProgress: false,
 		stopChan: make(chan struct{}),
+		store: NewStore(),
 	}
 
 	go walm.runCompaction()
@@ -67,26 +72,67 @@ func (walm *WALManager) Start() error {
 		}
 		walm.walFiles[fmt.Sprintf("wal-%d.wal", walm.currentWALFileNumber)] = walm.currentWalFile
 	} else {
-		maxIndex := 0
+		log.Printf("files are there")
+		maxIndex := int64(0)
 		for _, walFile := range walFiles {
+			log.Printf("walFile: %v", walFile)
 			walm.walFiles[walFile.Name()], err = NewWAL(filepath.Join(walm.walDir, walFile.Name()))
 			if err != nil {
+				log.Printf("walFile: %v", walFile)
 				log.Print("Error Opening file from walDir")
 			}
-			maxIndex = getIndexFromName(walFile.Name())
+			log.Printf("walFile: %v", walFile)
+			index := getIndexFromName(walFile.Name())
+			if index > maxIndex {
+				maxIndex = index
+			}
+			log.Printf("walFile: %v", walFile)
+		}
+		log.Printf("4")
+		walm.currentWALFileNumber = maxIndex
+		walm.currentWalFile = walm.walFiles[fmt.Sprintf("wal-%d.wal", walm.currentWALFileNumber)]
+	}
+
+	walm.BootstrapWAL()
+
+	return nil
+}
+
+func (walm *WALManager) BootstrapWAL() {
+	log.Printf("5")
+
+	log.Println("bootstraping the wal data into memory")
+
+	filenumslist := []int64{}
+	for k, _ := range walm.walFiles {
+		filenumslist = append(filenumslist, getIndexFromName(k))
+	}
+	slices.Sort(filenumslist)
+
+	for _, k := range filenumslist {
+		fileName := fmt.Sprintf("wal-%d.wal", k)
+		walEntries, err := walm.walFiles[fileName].Retrieve(walm.walDir)
+		if err != nil {
+			log.Fatalf("Error retrieving wal records from wal file")
+			return
+		}
+
+		for _, walEntry := range walEntries {
+			walm.store.ExecuteWALEntry(walEntry)
 		}
 	}
-	return nil
+	log.Printf("printing the bootstrapped values")
+	walm.store.PrintContents()
 }
 
 func getIndexFromName(name string) int64 {
 	// match expression wal-{}.wal
-	s := strings.TrimPrefix(filename, "wal-")
+	s := strings.TrimPrefix(name, "wal-")
 	s = strings.TrimSuffix(s, ".wal")
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		log.Printf("Unexpected  wal fil : %v", name)
-		return
+		log.Fatalf("Unexpected  wal fil : %v", name)
+		return 0
 	}
 	return int64(n)
 }
