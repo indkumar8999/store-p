@@ -65,6 +65,9 @@ func (store *KVStore) ExecuteWALEntry(wale *WALEntry) error {
 		return nil
 	case "get":
 		return nil
+	case "delete":
+		store.Delete(wale.Key)
+		return nil
 	default:
 		log.Printf("unexpected operation in the wal entry")
 		return nil

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	CompactionInterval = time.Minute * 10
+	CompactionInterval = time.Minute * 1
 )
 
 /*
@@ -162,9 +162,9 @@ func (walm *WALManager) performCompaction() {
 	}
 	walm.compactionInProgress = true
 
-	// We will change the current wal file to the next one
-	// TODO: Later we will add the logic to compact the wal files
+	compactWALFileNumber := walm.currentWALFileNumber
 
+	// We will change the current wal file to the next one
 	walm.currentWALFileNumber++
 	nextWALFilePath := filepath.Join(walm.walDir, fmt.Sprintf("wal-%d.wal", walm.currentWALFileNumber))
 	nextWAL, err := NewWAL(nextWALFilePath)
@@ -174,6 +174,39 @@ func (walm *WALManager) performCompaction() {
 	}
 	walm.currentWalFile = nextWAL
 	walm.walFiles[fmt.Sprintf("wal-%d.wal", walm.currentWALFileNumber)] = nextWAL
+
+	log.Printf("Performing compaction")
+	compactWAL := walm.walFiles[fmt.Sprintf("wal-%d.wal", compactWALFileNumber)]
+	compactWALEntries, err := compactWAL.Retrieve(walm.walDir)
+	if err != nil {
+		log.Fatalf("Failed to retrieve replay WAL entries: %v", err)
+		return
+	}
+
+	// Now we will replay the WAL entries to the new current WAL file
+	// Go through the drop the unncessary WAL entries
+	// We don't have to update the store with the replayed WAL entries because the database is already updated with the previous WAL entries
+	// We will just write the replayed WAL entries to the new current WAL file
+	relevantWALEntries := []*WALEntry{}
+	finalWALEntries := make(map[string]*WALEntry)
+	for _, compactWALEntry := range compactWALEntries {
+		if compactWALEntry.Op == "set" {
+			finalWALEntries[compactWALEntry.Key] = compactWALEntry
+		} else if compactWALEntry.Op == "delete" {
+			finalWALEntries[compactWALEntry.Key] = compactWALEntry
+			// TODO:We will have to ideally use the tombstone logic here to delete the key from the database
+		}
+	}
+	for _, finalWALEntry := range finalWALEntries {
+		relevantWALEntries = append(relevantWALEntries, finalWALEntry)
+	}
+	err = compactWAL.RewriteFile(relevantWALEntries)
+	if err != nil {
+		log.Fatalf("Failed to rewrite replay WAL file: %v", err)
+		return
+	}
+
+	log.Printf("Compaction completed")
 }
 
 func (walm *WALManager) Stop() {

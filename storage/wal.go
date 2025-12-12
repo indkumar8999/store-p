@@ -118,6 +118,33 @@ func ParseToWALEntry(instructionBytes []byte) (*WALEntry, error) {
 	return wal, err
 }
 
+func (wal *WAL) RewriteFile(wale []*WALEntry) error {
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+
+	err := wal.file.Truncate(0)
+	if err != nil {
+		return err
+	}
+	wal.file.Seek(0, io.SeekStart)
+	for _, waleEntry := range wale {
+		data, err := json.Marshal(waleEntry)
+		if err != nil {
+			return err
+		}
+
+		_, err = wal.writer.Write(append(data, '\n'))
+		if err != nil {
+			return err
+		}
+	}
+	err = wal.writer.Flush()
+	if err != nil {
+		return err
+	}
+
+	return wal.file.Sync()
+}
 
 func (wal *WAL) Close() error {
 	wal.mu.Lock()

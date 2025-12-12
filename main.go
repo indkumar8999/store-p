@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	// "math/rand"
+	"time"
 
 	"github.com/indkumar8999/store-p/storage"
 )
@@ -58,6 +59,6 @@ func main() {
 	// 	}
 	// }
 
-	
+	time.Sleep(time.Second * 100)
 
 }
